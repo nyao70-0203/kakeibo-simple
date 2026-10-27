@@ -285,6 +285,7 @@
           <option value="fixed">固定費のみ</option>
           <option value="variable">変動費のみ</option>
         </select>
+        <select id="categoryFilter"></select>
       </div>
       <div class="table-scroll">
         <table>
@@ -512,6 +513,18 @@ function populateMonthFilter(){
   sel.value = months.includes(prevValue) ? prevValue : current;
 }
 
+function populateCategoryFilter(){
+  const sel = document.getElementById('categoryFilter');
+  const prevValue = sel.value || 'all';
+  const expenseGroups = data.categoryGroupOrder.map(groupKey =>
+    `<optgroup label="${GROUP_LABELS[groupKey]}">${data.categories[groupKey].map(c => `<option value="${c}">${c}</option>`).join('')}</optgroup>`
+  ).join('');
+  const incomeGroup = `<optgroup label="収入">${data.categories.income.map(c => `<option value="${c}">${c}</option>`).join('')}</optgroup>`;
+  sel.innerHTML = `<option value="all">すべてのカテゴリ</option>${expenseGroups}${incomeGroup}`;
+  const allValues = [...data.categories.fixed, ...data.categories.variable, ...data.categories.income];
+  sel.value = (prevValue === 'all' || allValues.includes(prevValue)) ? prevValue : 'all';
+}
+
 function populateHomeMonthFilter(){
   const months = [...new Set(data.entries.map(e => monthKey(e.date)))].sort().reverse();
   const current = currentMonth();
@@ -600,9 +613,11 @@ function renderList(){
   const month = document.getElementById('monthFilter').value;
   const typeFilter = document.getElementById('typeFilter').value;
   const costTypeFilter = document.getElementById('costTypeFilter').value;
+  const categoryFilter = document.getElementById('categoryFilter').value;
   let entries = data.entries.filter(e => monthKey(e.date) === month);
   if(typeFilter !== 'all') entries = entries.filter(e => e.type === typeFilter);
   if(costTypeFilter !== 'all') entries = entries.filter(e => e.type === 'expense' && categoryType(e.category) === costTypeFilter);
+  if(categoryFilter !== 'all') entries = entries.filter(e => e.category === categoryFilter);
   entries.sort((a,b) => b.date.localeCompare(a.date));
 
   const tbody = document.getElementById('entryTbody');
@@ -1051,6 +1066,7 @@ document.getElementById('tabs').addEventListener('click', (e) => {
 
 function renderAll(){
   populateMonthFilter();
+  populateCategoryFilter();
   populateHomeMonthFilter();
   renderSummary();
   renderRemainingBudget();
@@ -1064,6 +1080,7 @@ function renderAll(){
 document.getElementById('monthFilter').addEventListener('change', renderList);
 document.getElementById('typeFilter').addEventListener('change', renderList);
 document.getElementById('costTypeFilter').addEventListener('change', renderList);
+document.getElementById('categoryFilter').addEventListener('change', renderList);
 document.getElementById('homeMonthFilter').addEventListener('change', () => {
   renderSummary();
   renderRemainingBudget();
