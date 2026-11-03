@@ -317,6 +317,7 @@
       <div id="budgetList"></div>
       <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:14px;">
         <span id="budgetSavedMsg" style="display:none;font-size:13px;color:var(--income);">保存しました</span>
+        <button type="button" id="budgetApplyPastBtn" class="submit" style="background:#fff;color:var(--accent);border:1px solid var(--accent);">過去の月にも反映</button>
         <button type="button" id="budgetConfirmBtn" class="submit">確定</button>
       </div>
     </div>
@@ -882,6 +883,31 @@ document.getElementById('budgetConfirmBtn').addEventListener('click', () => {
     monthBudgets[input.dataset.cat] = parseAmount(input.value);
   });
   data.budgetsByMonth[month] = monthBudgets;
+  saveData();
+  renderBudgets();
+  renderRemainingBudget();
+
+  const msg = document.getElementById('budgetSavedMsg');
+  msg.style.display = 'inline';
+  clearTimeout(msg._hideTimer);
+  msg._hideTimer = setTimeout(() => { msg.style.display = 'none'; }, 2000);
+});
+
+document.getElementById('budgetApplyPastBtn').addEventListener('click', () => {
+  const month = budgetMonth();
+  const monthBudgets = {};
+  document.querySelectorAll('#budgetList .budget-input').forEach(input => {
+    monthBudgets[input.dataset.cat] = parseAmount(input.value);
+  });
+  const pastMonths = [...new Set(data.entries.map(e => monthKey(e.date)))].filter(m => m < month).sort();
+  if(pastMonths.length === 0){
+    alert('記録がある過去の月が見つかりませんでした。');
+    return;
+  }
+  if(!confirm(`${month}の予算を、記録がある過去の${pastMonths.length}か月分（${pastMonths.join('、')}）にも反映します。過去に設定していた予算は上書きされます。よろしいですか？`)) return;
+
+  data.budgetsByMonth[month] = monthBudgets;
+  pastMonths.forEach(m => { data.budgetsByMonth[m] = { ...monthBudgets }; });
   saveData();
   renderBudgets();
   renderRemainingBudget();
