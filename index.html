@@ -34,6 +34,12 @@
   }
   .wrap{max-width:900px;margin:0 auto;}
   h1{font-size:22px;margin:0 0 20px;}
+  #refreshBtn{
+    margin-bottom:20px;
+    background:#fff;border:1px solid var(--border);border-radius:8px;
+    padding:7px 12px;font-size:13px;color:var(--muted);cursor:pointer;
+  }
+  #refreshBtn:hover{background:#f4f6f9;}
   h2{font-size:15px;margin:0 0 12px;color:var(--muted);font-weight:600;letter-spacing:.02em;}
   .card{
     background:var(--card);
@@ -185,7 +191,10 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>家計簿</h1>
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <h1>家計簿</h1>
+    <button type="button" id="refreshBtn" title="ページを更新">⟳ 更新</button>
+  </div>
 
   <nav class="tabs" id="tabs">
     <button type="button" data-tab="home" class="active">ホーム</button>
@@ -300,6 +309,11 @@
   <section class="tab-panel" data-panel="budget">
     <div class="card">
       <h2>予算設定（カテゴリ別・月あたり）</h2>
+      <div class="filters" style="margin-bottom:14px;">
+        <label for="budgetMonthFilter" style="font-size:13px;color:var(--muted);">設定する月</label>
+        <select id="budgetMonthFilter"></select>
+      </div>
+      <div id="budgetMonthHint" style="display:none;font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
       <div id="budgetList"></div>
       <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:14px;">
         <span id="budgetSavedMsg" style="display:none;font-size:13px;color:var(--income);">保存しました</span>
@@ -372,12 +386,19 @@ function defaultCategories(){
 function normalizeData(parsed){
   if(!parsed.entries) parsed.entries = [];
   if(!parsed.categories) parsed.categories = defaultCategories();
-  if(!parsed.budgets) parsed.budgets = {};
   if(!parsed.fundEntries) parsed.fundEntries = [];
   delete parsed.savingsEntries;
   if(!parsed.categoryGroupOrder || !Array.isArray(parsed.categoryGroupOrder) || parsed.categoryGroupOrder.length !== 2){
     parsed.categoryGroupOrder = ['fixed','variable'];
   }
+  if(!parsed.budgetsByMonth || typeof parsed.budgetsByMonth !== 'object'){
+    parsed.budgetsByMonth = {};
+    if(parsed.budgets && typeof parsed.budgets === 'object' && Object.keys(parsed.budgets).length){
+      // 旧バージョン（月ごとではない単一の予算設定）からの移行
+      parsed.budgetsByMonth[currentMonth()] = parsed.budgets;
+    }
+  }
+  delete parsed.budgets;
   parsed.entries.forEach(e => { if(e.source !== 'auto' && e.source !== 'manual') e.source = 'manual'; });
   return parsed;
 }
@@ -405,6 +426,16 @@ function pad2(n){ return String(n).padStart(2,'0'); }
 function localDateKey(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
 function localMonthKey(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}`; }
 function currentMonth(){ return localMonthKey(new Date()); }
+function shiftMonth(monthStr, delta){
+  const [y, m] = monthStr.split('-').map(Number);
+  return localMonthKey(new Date(y, m - 1 + delta, 1));
+}
+// 指定した月の予算設定を返す。その月自体の設定がなければ、設定済みの直近より前の月の予算をデフォルトとして返す
+function resolveBudgetsForMonth(month){
+  if(data.budgetsByMonth[month]) return data.budgetsByMonth[month];
+  const priorMonths = Object.keys(data.budgetsByMonth).filter(m => m < month).sort().reverse();
+  return priorMonths.length ? data.budgetsByMonth[priorMonths[0]] : {};
+}
 
 const typeToggle = document.getElementById('typeToggle');
 const fCategory = document.getElementById('fCategory');
@@ -545,6 +576,23 @@ function homeMonthLabel(){
   return month === currentMonth() ? '今月' : month;
 }
 
+function populateBudgetMonthFilter(){
+  const months = new Set([...data.entries.map(e => monthKey(e.date)), ...Object.keys(data.budgetsByMonth)]);
+  const current = currentMonth();
+  months.add(current);
+  months.add(shiftMonth(current, 1)); // 来月分も先に設定できるように
+  const sorted = [...months].sort().reverse();
+  const sel = document.getElementById('budgetMonthFilter');
+  const prevValue = sel.value || current;
+  sel.innerHTML = sorted.map(m => `<option value="${m}">${m === current ? m + '（今月）' : m}</option>`).join('');
+  sel.value = sorted.includes(prevValue) ? prevValue : current;
+}
+
+function budgetMonth(){
+  const sel = document.getElementById('budgetMonthFilter');
+  return sel.value || currentMonth();
+}
+
 function renderSummary(){
   const month = homeMonth();
   const label = homeMonthLabel();
@@ -564,18 +612,19 @@ function renderRemainingBudget(){
   const label = homeMonthLabel();
   document.getElementById('remainingBudgetLabel').textContent = month === currentMonth() ? `${label}あと使える予算` : `${label}の残り予算`;
   const allCats = [...data.categories.fixed, ...data.categories.variable];
+  const budgets = resolveBudgetsForMonth(month);
   const spentByCategory = {};
   data.entries.filter(e => monthKey(e.date) === month && e.type === 'expense').forEach(e => {
     spentByCategory[e.category] = (spentByCategory[e.category] || 0) + e.amount;
   });
 
   const breakdownEl = document.getElementById('remainingBudgetByCategory');
-  const budgetedCats = allCats.filter(cat => (data.budgets[cat] || 0) > 0);
+  const budgetedCats = allCats.filter(cat => (budgets[cat] || 0) > 0);
   if(budgetedCats.length === 0){
     breakdownEl.innerHTML = '<div class="empty">カテゴリ別の予算が設定されていません（予算タブで設定できます）</div>';
   } else {
     breakdownEl.innerHTML = budgetedCats.map(cat => {
-      const budget = data.budgets[cat] || 0;
+      const budget = budgets[cat] || 0;
       const spent = spentByCategory[cat] || 0;
       const remaining = budget - spent;
       const pct = Math.round((spent / budget) * 100);
@@ -592,7 +641,7 @@ function renderRemainingBudget(){
 
   let totalBudget = 0, totalSpent = 0;
   allCats.forEach(cat => {
-    totalBudget += data.budgets[cat] || 0;
+    totalBudget += budgets[cat] || 0;
     totalSpent += spentByCategory[cat] || 0;
   });
   const el = document.getElementById('remainingBudget');
@@ -772,10 +821,10 @@ function renderBarChart(){
   });
 }
 
-function budgetRowsHtml(categories, spentByCategory){
+function budgetRowsHtml(categories, spentByCategory, budgets){
   let totalBudget = 0, totalSpent = 0;
   const rows = categories.map(cat => {
-    const budget = data.budgets[cat] || 0;
+    const budget = budgets[cat] || 0;
     const spent = spentByCategory[cat] || 0;
     totalBudget += budget;
     totalSpent += spent;
@@ -794,14 +843,15 @@ function budgetRowsHtml(categories, spentByCategory){
 }
 
 function renderBudgets(){
-  const month = currentMonth();
+  const month = budgetMonth();
   const entries = data.entries.filter(e => monthKey(e.date) === month && e.type === 'expense');
   const spentByCategory = {};
   entries.forEach(e => { spentByCategory[e.category] = (spentByCategory[e.category] || 0) + e.amount; });
+  const budgets = resolveBudgetsForMonth(month);
 
   const container = document.getElementById('budgetList');
   container.innerHTML = data.categoryGroupOrder.map(groupKey => {
-    const group = budgetRowsHtml(data.categories[groupKey], spentByCategory);
+    const group = budgetRowsHtml(data.categories[groupKey], spentByCategory, budgets);
     return `
       <div class="budget-group">
         <div class="budget-group-title">${GROUP_LABELS[groupKey]}<span>¥${group.totalSpent.toLocaleString()} / ¥${group.totalBudget.toLocaleString()}</span></div>
@@ -813,12 +863,25 @@ function renderBudgets(){
   container.querySelectorAll('.budget-input').forEach(input => {
     enforceHalfWidthDigits(input);
   });
+
+  const hint = document.getElementById('budgetMonthHint');
+  if(data.budgetsByMonth[month]){
+    hint.style.display = 'none';
+  } else if(Object.keys(budgets).length){
+    hint.style.display = 'block';
+    hint.textContent = 'この月の予算はまだ保存されていません。前月までの設定を初期値として表示しています。「確定」を押すとこの月の予算として保存されます。';
+  } else {
+    hint.style.display = 'none';
+  }
 }
 
 document.getElementById('budgetConfirmBtn').addEventListener('click', () => {
+  const month = budgetMonth();
+  const monthBudgets = {};
   document.querySelectorAll('#budgetList .budget-input').forEach(input => {
-    data.budgets[input.dataset.cat] = parseAmount(input.value);
+    monthBudgets[input.dataset.cat] = parseAmount(input.value);
   });
+  data.budgetsByMonth[month] = monthBudgets;
   saveData();
   renderBudgets();
   renderRemainingBudget();
@@ -828,6 +891,8 @@ document.getElementById('budgetConfirmBtn').addEventListener('click', () => {
   clearTimeout(msg._hideTimer);
   msg._hideTimer = setTimeout(() => { msg.style.display = 'none'; }, 2000);
 });
+
+document.getElementById('budgetMonthFilter').addEventListener('change', renderBudgets);
 
 function categoryGroupHtml(groupKey, label, list){
   const items = list.map((c,i) => `
@@ -861,9 +926,13 @@ function renameCategory(group, oldName, newName){
   if(idx === -1 || arr.includes(newName)) return false;
   arr[idx] = newName;
 
-  if(group !== 'income' && Object.prototype.hasOwnProperty.call(data.budgets, oldName)){
-    data.budgets[newName] = data.budgets[oldName];
-    delete data.budgets[oldName];
+  if(group !== 'income'){
+    Object.values(data.budgetsByMonth).forEach(monthBudgets => {
+      if(Object.prototype.hasOwnProperty.call(monthBudgets, oldName)){
+        monthBudgets[newName] = monthBudgets[oldName];
+        delete monthBudgets[oldName];
+      }
+    });
   }
 
   const entryType = group === 'income' ? 'income' : 'expense';
@@ -938,7 +1007,7 @@ function renderCategoryManager(){
       const group = btn.dataset.group;
       const cat = btn.dataset.cat;
       data.categories[group] = data.categories[group].filter(c => c !== cat);
-      delete data.budgets[cat];
+      Object.values(data.budgetsByMonth).forEach(monthBudgets => { delete monthBudgets[cat]; });
       saveData();
       refreshCategoryOptions();
       renderAll();
@@ -1068,6 +1137,7 @@ function renderAll(){
   populateMonthFilter();
   populateCategoryFilter();
   populateHomeMonthFilter();
+  populateBudgetMonthFilter();
   renderSummary();
   renderRemainingBudget();
   renderList();
@@ -1122,6 +1192,10 @@ document.getElementById('importFile').addEventListener('change', (e) => {
     e.target.value = '';
   };
   reader.readAsText(file);
+});
+
+document.getElementById('refreshBtn').addEventListener('click', () => {
+  window.location.reload();
 });
 
 renderAll();
