@@ -1007,7 +1007,11 @@ function renderCategoryManager(){
       const group = btn.dataset.group;
       const cat = btn.dataset.cat;
       data.categories[group] = data.categories[group].filter(c => c !== cat);
-      Object.values(data.budgetsByMonth).forEach(monthBudgets => { delete monthBudgets[cat]; });
+      // 過去の月の予算設定は履歴として残し、今月・未来の月の分だけ削除する
+      const thisMonth = currentMonth();
+      Object.keys(data.budgetsByMonth).forEach(m => {
+        if(m >= thisMonth) delete data.budgetsByMonth[m][cat];
+      });
       saveData();
       refreshCategoryOptions();
       renderAll();
